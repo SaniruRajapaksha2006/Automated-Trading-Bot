@@ -1,0 +1,17 @@
+# Core trading
+alpaca-py==0.22.0        # Alpaca's official Python library
+python-dotenv==1.0.0      # Loads API keys from .env file
+
+# Data handling
+pandas==2.0.3             # Data manipulation (like Excel on steroids)
+numpy==1.24.3             # Math operations
+
+# Utilities
+pyyaml==6.0               # Reads YAML config files
+requests==2.31.0          # Makes HTTP requests
+websocket-client==1.6.0   # Real-time data streaming
+
+# For later (Day 2+)
+ta==0.10.0                # Technical indicators
+plotly==5.17.0            # Charts
+streamlit==1.29.0         # Dashboard
