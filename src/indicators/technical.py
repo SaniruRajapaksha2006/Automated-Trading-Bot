@@ -138,20 +138,110 @@ class TechnicalIndicators:
 
         return df
 
+    def add_adx(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """
+        Average Directional Index - Trend strength indicator.
+
+        ADX > 25 = Strong trend
+        ADX < 20 = Weak trend/Sideways
+        """
+        high = df['High']
+        low = df['Low']
+        close = df['Close']
+
+        # True Range
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        # Directional Movement
+        plus_dm = high.diff()
+        minus_dm = low.diff()
+        plus_dm = plus_dm.where(plus_dm > 0, 0)
+        minus_dm = minus_dm.where(minus_dm < 0, 0).abs()
+
+        # Smooth with Wilder's method
+        atr = tr.rolling(period).mean()
+        plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
+        minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        df['ADX'] = dx.rolling(period).mean()
+        df['PLUS_DI'] = plus_di
+        df['MINUS_DI'] = minus_di
+
+        return df
+
+    def add_cci(self, df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+        """
+        Commodity Channel Index - Measures deviation from mean.
+
+        CCI > 100 = Overbought
+        CCI < -100 = Oversold
+        """
+        tp = (df['High'] + df['Low'] + df['Close']) / 3
+        sma_tp = tp.rolling(period).mean()
+        mad = tp.rolling(period).apply(lambda x: abs(x - x.mean()).mean())
+        df['CCI'] = (tp - sma_tp) / (0.015 * mad)
+        return df
+
+    def add_roc(self, df: pd.DataFrame, period: int = 10) -> pd.DataFrame:
+        """
+        Rate of Change - Price momentum.
+
+        ROC > 0 = Positive momentum
+        ROC < 0 = Negative momentum
+        """
+        df['ROC'] = (df['Close'] / df['Close'].shift(period) - 1) * 100
+        return df
+
+    def add_aroon(self, df: pd.DataFrame, period: int = 25) -> pd.DataFrame:
+        """
+        Aroon Indicator - Trend strength and reversal.
+
+        Aroon Up > 70 = Strong uptrend
+        Aroon Down > 70 = Strong downtrend
+        """
+        aroon_up = 100 * df['High'].rolling(period + 1).apply(lambda x: x.argmax()) / period
+        aroon_down = 100 * df['Low'].rolling(period + 1).apply(lambda x: x.argmin()) / period
+        df['AROON_UP'] = aroon_up
+        df['AROON_DOWN'] = aroon_down
+        df['AROON_OSC'] = aroon_up - aroon_down
+        return df
+
+    def add_williams_r(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """
+        Williams %R - Momentum indicator similar to Stochastic.
+
+        Williams %R < -80 = Oversold
+        Williams %R > -20 = Overbought
+        """
+        highest_high = df['High'].rolling(period).max()
+        lowest_low = df['Low'].rolling(period).min()
+        df['WILLIAMS_R'] = -100 * (highest_high - df['Close']) / (highest_high - lowest_low)
+        return df
+
     # ================================================================
     # ADD ALL INDICATORS AT ONCE
     # ================================================================
 
     def add_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add ALL technical indicators to DataFrame."""
         df = self.add_sma(df, 20)
         df = self.add_sma(df, 50)
         df = self.add_ema(df, 12)
         df = self.add_ema(df, 20)
         df = self.add_ema(df, 26)
-        df = self.add_rsi(df, 14)  # Add RSI
-        df = self.add_macd(df)  # Add MACD
-        df = self.add_bollinger_bands(df)  # Add Bollinger Bands
-        df = self.add_atr(df, 14)  # Add ATR
+        df = self.add_rsi(df, 14)
+        df = self.add_macd(df)
+        df = self.add_bollinger_bands(df)
+        df = self.add_atr(df, 14)
+        #df = self.add_adx(df, 14)  # NEW
+        #df = self.add_cci(df, 20)  # NEW
+        #df = self.add_roc(df, 10)  # NEW
+        #df = self.add_aroon(df, 25)  # NEW
+        #df = self.add_williams_r(df, 14)  # NEW
         return df
 
 
