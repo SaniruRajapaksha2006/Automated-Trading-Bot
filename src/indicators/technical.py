@@ -143,22 +143,15 @@ class TechnicalIndicators:
     # ================================================================
 
     def add_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add all technical indicators to the DataFrame.
-        """
-        # Make a copy to avoid warnings
-        df = df.copy()
-
         df = self.add_sma(df, 20)
         df = self.add_sma(df, 50)
         df = self.add_ema(df, 12)
         df = self.add_ema(df, 20)
         df = self.add_ema(df, 26)
-        df = self.add_rsi(df, 14)
-        df = self.add_macd(df)
-        df = self.add_bollinger_bands(df)
-        df = self.add_atr(df, 14)
-
+        df = self.add_rsi(df, 14)  # Add RSI
+        df = self.add_macd(df)  # Add MACD
+        df = self.add_bollinger_bands(df)  # Add Bollinger Bands
+        df = self.add_atr(df, 14)  # Add ATR
         return df
 
 
