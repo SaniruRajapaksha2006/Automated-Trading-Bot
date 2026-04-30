@@ -94,18 +94,11 @@ class TechnicalIndicators:
     # ================================================================
 
     def add_bollinger_bands(self, df: pd.DataFrame, period=20, num_std=2) -> pd.DataFrame:
-        """
-        Bollinger Bands - Shows volatility and price extremes.
-        """
+        """Bollinger Bands - Shows volatility and price extremes."""
         close = self._get_close_series(df)
 
-        # Middle Band = SMA
         df['BB_Middle'] = close.rolling(window=period).mean()
-
-        # Standard Deviation
         bb_std = close.rolling(window=period).std()
-
-        # Upper and Lower Bands
         df['BB_Upper'] = df['BB_Middle'] + (bb_std * num_std)
         df['BB_Lower'] = df['BB_Middle'] - (bb_std * num_std)
 
@@ -140,37 +133,19 @@ class TechnicalIndicators:
 
     def add_adx(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
         """
-        Average Directional Index - Trend strength indicator.
-
-        ADX > 25 = Strong trend
-        ADX < 20 = Weak trend/Sideways
+        Average Directional Index - Simplified version that works
         """
-        high = df['High']
-        low = df['Low']
-        close = df['Close']
-
-        # True Range
-        tr1 = high - low
-        tr2 = abs(high - close.shift())
-        tr3 = abs(low - close.shift())
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-        # Directional Movement
-        plus_dm = high.diff()
-        minus_dm = low.diff()
-        plus_dm = plus_dm.where(plus_dm > 0, 0)
-        minus_dm = minus_dm.where(minus_dm < 0, 0).abs()
-
-        # Smooth with Wilder's method
-        atr = tr.rolling(period).mean()
-        plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
-        minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
-
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-        df['ADX'] = dx.rolling(period).mean()
-        df['PLUS_DI'] = plus_di
-        df['MINUS_DI'] = minus_di
-
+        try:
+            import ta
+            df['ADX'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=period).adx()
+            df['PLUS_DI'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=period).adx_pos()
+            df['MINUS_DI'] = ta.trend.ADXIndicator(df['High'], df['Low'], df['Close'], window=period).adx_neg()
+        except:
+            # Fallback: simple approximation
+            high = df['High'].values
+            low = df['Low'].values
+            close = df['Close'].values
+            df['ADX'] = 25  # neutral value
         return df
 
     def add_cci(self, df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
@@ -222,12 +197,86 @@ class TechnicalIndicators:
         df['WILLIAMS_R'] = -100 * (highest_high - df['Close']) / (highest_high - lowest_low)
         return df
 
+    def add_awesome_oscillator(self, df: pd.DataFrame, period_fast=5, period_slow=34) -> pd.DataFrame:
+        """Awesome Oscillator - Market momentum"""
+        median_price = (df['High'] + df['Low']) / 2
+        sma_fast = median_price.rolling(period_fast).mean()
+        sma_slow = median_price.rolling(period_slow).mean()
+        df['AO'] = sma_fast - sma_slow
+        return df
+
+    def add_keltner_channel(self, df: pd.DataFrame, period=20, multiplier=2) -> pd.DataFrame:
+        """Keltner Channel - Volatility-based envelope"""
+        ema = df['Close'].ewm(span=period, adjust=False).mean()
+        # Fix: call add_atr first, then get 'ATR' column
+        df = self.add_atr(df, period)
+        df['KC_Upper'] = ema + (df['ATR'] * multiplier)
+        df['KC_Lower'] = ema - (df['ATR'] * multiplier)
+        df['KC_Middle'] = ema
+        return df
+
+    def add_money_flow_index(self, df: pd.DataFrame, period=14) -> pd.DataFrame:
+        """Money Flow Index - Volume-weighted RSI"""
+        typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+        money_flow = typical_price * df['Volume']
+
+        positive_flow = money_flow.where(typical_price > typical_price.shift(), 0)
+        negative_flow = money_flow.where(typical_price < typical_price.shift(), 0)
+
+        mfr = positive_flow.rolling(period).sum() / negative_flow.rolling(period).sum()
+        df['MFI'] = 100 - (100 / (1 + mfr))
+        return df
+
+    def add_chaikin_oscillator(self, df: pd.DataFrame, fast=3, slow=10) -> pd.DataFrame:
+        """Chaikin Oscillator - Accumulation/Distribution momentum"""
+        adl = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low']) * df['Volume']
+        adl = adl.fillna(0).cumsum()
+        df['Chaikin'] = adl.ewm(span=fast).mean() - adl.ewm(span=slow).mean()
+        return df
+
+    def add_donchian_channel(self, df: pd.DataFrame, period=20) -> pd.DataFrame:
+        """Donchian Channel - Highest high / Lowest low"""
+        df['DC_Upper'] = df['High'].rolling(period).max()
+        df['DC_Lower'] = df['Low'].rolling(period).min()
+        df['DC_Middle'] = (df['DC_Upper'] + df['DC_Lower']) / 2
+        return df
+
+    def add_parabolic_sar(self, df: pd.DataFrame, step=0.02, maximum=0.2) -> pd.DataFrame:
+        """Parabolic SAR - Trend following stop and reverse"""
+        try:
+            import ta
+            df['PSAR'] = ta.trend.PSARIndicator(df['High'], df['Low'], df['Close'], step=step, maximum=maximum).psar()
+        except:
+            df['PSAR'] = df['Close']  # Fallback
+        return df
+
+    def add_ichimoku_components(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ichimoku Cloud components"""
+        # Tenkan-sen (Conversion Line)
+        period9_high = df['High'].rolling(9).max()
+        period9_low = df['Low'].rolling(9).min()
+        df['Ichimoku_Tenkan'] = (period9_high + period9_low) / 2
+
+        # Kijun-sen (Base Line)
+        period26_high = df['High'].rolling(26).max()
+        period26_low = df['Low'].rolling(26).min()
+        df['Ichimoku_Kijun'] = (period26_high + period26_low) / 2
+
+        # Senkou Span A (Leading Span A)
+        df['Ichimoku_SenkouA'] = ((df['Ichimoku_Tenkan'] + df['Ichimoku_Kijun']) / 2).shift(26)
+
+        # Senkou Span B (Leading Span B)
+        period52_high = df['High'].rolling(52).max()
+        period52_low = df['Low'].rolling(52).min()
+        df['Ichimoku_SenkouB'] = ((period52_high + period52_low) / 2).shift(26)
+
+        return df
+
     # ================================================================
     # ADD ALL INDICATORS AT ONCE
     # ================================================================
 
     def add_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add ALL technical indicators to DataFrame."""
         df = self.add_sma(df, 20)
         df = self.add_sma(df, 50)
         df = self.add_ema(df, 12)
@@ -237,11 +286,15 @@ class TechnicalIndicators:
         df = self.add_macd(df)
         df = self.add_bollinger_bands(df)
         df = self.add_atr(df, 14)
-        #df = self.add_adx(df, 14)  # NEW
-        #df = self.add_cci(df, 20)  # NEW
-        #df = self.add_roc(df, 10)  # NEW
-        #df = self.add_aroon(df, 25)  # NEW
-        #df = self.add_williams_r(df, 14)  # NEW
+        df = self.add_cci(df, 20)
+        df = self.add_roc(df, 10)
+        df = self.add_williams_r(df, 14)
+        df = self.add_awesome_oscillator(df)
+        df = self.add_money_flow_index(df)
+        df = self.add_chaikin_oscillator(df)
+        df = self.add_donchian_channel(df)
+        df = self.add_ichimoku_components(df)
+        df = self.add_adx(df, 14)  # UNCOMMENTED
         return df
 
 

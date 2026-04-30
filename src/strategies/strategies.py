@@ -126,15 +126,26 @@ class CompleteStrategies:
         elif current_cci > 100:
             return Signal.SELL, 60, f"Overbought (CCI: {current_cci:.1f})"
         return Signal.HOLD, 0, f"Neutral (CCI: {current_cci:.1f})"
-    
+
     def strategy_bollinger_reversion(self) -> Tuple[Signal, float, str]:
-        if 'BB_Upper_20' not in self.df.columns:
+        """Bollinger Bands - Price reversion to mean"""
+        # Try different possible column names
+        upper_col = None
+        lower_col = None
+
+        if 'BB_Upper_20' in self.df.columns:
+            upper_col = 'BB_Upper_20'
+            lower_col = 'BB_Lower_20'
+        elif 'BB_Upper' in self.df.columns:
+            upper_col = 'BB_Upper'
+            lower_col = 'BB_Lower'
+        else:
             return Signal.HOLD, 0, "Bollinger Bands not available"
-        
+
         current_price = self._get_latest_value('Close')
-        upper = self._get_latest_value('BB_Upper_20')
-        lower = self._get_latest_value('BB_Lower_20')
-        
+        upper = self._get_latest_value(upper_col)
+        lower = self._get_latest_value(lower_col)
+
         if current_price <= lower:
             return Signal.BUY, 65, "Price at lower Bollinger Band"
         elif current_price >= upper:
@@ -168,7 +179,77 @@ class CompleteStrategies:
         elif current_vol > avg_vol * 1.5 and price_change < -2:
             return Signal.SELL, 60, f"Volume breakdown {price_change:.1f}%"
         return Signal.HOLD, 0, "Normal volume"
-    
+
+    def strategy_keltner_breakout(self) -> Tuple[Signal, float, str]:
+        """Keltner Channel Breakout"""
+        if 'KC_Upper' not in self.df.columns:
+            return Signal.HOLD, 0, "Keltner not available"
+
+        current_price = self._get_latest_value('Close')
+        upper = self._get_latest_value('KC_Upper')
+        lower = self._get_latest_value('KC_Lower')
+
+        if current_price > upper:
+            return Signal.BUY, 65, "Price broke above Keltner Channel"
+        elif current_price < lower:
+            return Signal.SELL, 65, "Price broke below Keltner Channel"
+        return Signal.HOLD, 0, "Within Keltner Channel"
+
+    def strategy_mfi_extreme(self) -> Tuple[Signal, float, str]:
+        """Money Flow Index - Volume-weighted RSI"""
+        if 'MFI' not in self.df.columns:
+            return Signal.HOLD, 0, "MFI not available"
+
+        current_mfi = self._get_latest_value('MFI')
+
+        if current_mfi < 20:
+            return Signal.BUY, 60, f"Oversold (MFI: {current_mfi:.1f})"
+        elif current_mfi > 80:
+            return Signal.SELL, 60, f"Overbought (MFI: {current_mfi:.1f})"
+        return Signal.HOLD, 0, f"Neutral (MFI: {current_mfi:.1f})"
+
+    def strategy_chaikin_momentum(self) -> Tuple[Signal, float, str]:
+        """Chaikin Oscillator - Accumulation/Distribution"""
+        if 'Chaikin' not in self.df.columns:
+            return Signal.HOLD, 0, "Chaikin not available"
+
+        current = self._get_latest_value('Chaikin')
+        prev = self._get_scalar(self.df['Chaikin'].iloc[-2])
+
+        if current > 0 and prev <= 0:
+            return Signal.BUY, 55, "Chaikin turned positive (accumulation)"
+        elif current < 0 and prev >= 0:
+            return Signal.SELL, 55, "Chaikin turned negative (distribution)"
+        return Signal.HOLD, 0, "Chaikin neutral"
+
+    def strategy_psar_reversal(self) -> Tuple[Signal, float, str]:
+        """Parabolic SAR - Trend reversal detection"""
+        if 'PSAR' not in self.df.columns:
+            return Signal.HOLD, 0, "PSAR not available"
+
+        current_price = self._get_latest_value('Close')
+        psar = self._get_latest_value('PSAR')
+
+        if current_price > psar:
+            return Signal.BUY, 55, "Price above PSAR (uptrend)"
+        else:
+            return Signal.SELL, 55, "Price below PSAR (downtrend)"
+
+    def strategy_donchian_breakout(self) -> Tuple[Signal, float, str]:
+        """Donchian Channel Breakout"""
+        if 'DC_Upper' not in self.df.columns:
+            return Signal.HOLD, 0, "Donchian not available"
+
+        current_price = self._get_latest_value('Close')
+        upper = self._get_latest_value('DC_Upper')
+        lower = self._get_latest_value('DC_Lower')
+
+        if current_price >= upper:
+            return Signal.BUY, 60, "20-day high breakout"
+        elif current_price <= lower:
+            return Signal.SELL, 60, "20-day low breakdown"
+        return Signal.HOLD, 0, "Within range"
+
     def get_all_signals(self) -> List[Tuple[Signal, float, str, str]]:
         all_signals = []
         all_signals.append((*self.strategy_ma_crossover(), "MA_Crossover"))
@@ -180,6 +261,11 @@ class CompleteStrategies:
         all_signals.append((*self.strategy_bollinger_reversion(), "Bollinger"))
         all_signals.append((*self.strategy_z_score_reversion(), "Z_Score"))
         all_signals.append((*self.strategy_volume_breakout(), "Volume_Breakout"))
+        all_signals.append((*self.strategy_keltner_breakout(), "Keltner_Breakout"))
+        all_signals.append((*self.strategy_mfi_extreme(), "MFI_Extreme"))
+        all_signals.append((*self.strategy_chaikin_momentum(), "Chaikin"))
+        all_signals.append((*self.strategy_psar_reversal(), "PSAR"))
+        all_signals.append((*self.strategy_donchian_breakout(), "Donchian"))
         return all_signals
     
     def combined_signal(self) -> Tuple[Signal, float, Dict]:
