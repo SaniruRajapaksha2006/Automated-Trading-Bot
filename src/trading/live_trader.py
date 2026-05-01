@@ -158,6 +158,19 @@ class SimpleLiveTrader:
             print(f"   ❌ Fetch error: {e}")
             return None
 
+    def get_pending_orders(self, symbol: str = None):
+        """Get pending (not yet filled) orders"""
+        try:
+            orders = self.trading_client.get_orders()
+            pending = []
+            for order in orders:
+                if order.status in ['new', 'pending_new', 'accepted', 'partially_filled']:
+                    if symbol is None or order.symbol == symbol:
+                        pending.append(order)
+            return pending
+        except:
+            return []
+
     def check_symbol(self, symbol: str):
         """Check a single symbol and execute trades via Alpaca"""
         print(f"\n{'='*50}")
@@ -183,6 +196,12 @@ class SimpleLiveTrader:
             position_symbols = [p.symbol for p in alpaca_positions]
         except:
             position_symbols = []
+
+        # Check for pending orders first
+        pending_orders = self.get_pending_orders(symbol)
+        if pending_orders:
+            print(f"   ⏳ Already have pending order for {symbol}, skipping...")
+            return
 
         # Execute BUY order
         if signal['action'] == "BUY" and signal['confidence'] > 50:
@@ -259,11 +278,77 @@ class SimpleLiveTrader:
         else:
             print(f"   📊 HOLD - No clear signal")
 
+    def check_positions_for_exits(self):
+        """Check open positions for stop loss/take profit triggers"""
+        try:
+            positions = self.trading_client.get_all_positions()
+
+            for position in positions:
+                symbol = position.symbol
+                current_price = float(position.current_price)
+                entry_price = float(position.avg_entry_price)
+                qty = int(float(position.qty))
+
+                # Calculate P&L percentage
+                pnl_pct = ((current_price - entry_price) / entry_price) * 100
+
+                # Stop Loss: Sell if down 3%
+                if pnl_pct <= -3.0:
+                    print(f"\n   🔴 STOP LOSS TRIGGERED for {symbol}")
+                    print(f"      Entry: ${entry_price:.2f} | Current: ${current_price:.2f} | Loss: {pnl_pct:.1f}%")
+
+                    order_request = MarketOrderRequest(
+                        symbol=symbol,
+                        qty=qty,
+                        side=OrderSide.SELL,
+                        time_in_force=TimeInForce.DAY
+                    )
+                    order = self.trading_client.submit_order(order_request)
+                    print(f"      ✅ Stop loss order submitted! Order ID: {order.id}")
+
+                    self.trade_history.append({
+                        "timestamp": datetime.now(),
+                        "symbol": symbol,
+                        "action": "STOP_LOSS",
+                        "shares": qty,
+                        "price": current_price,
+                        "pnl": qty * (current_price - entry_price)
+                    })
+
+                # Take Profit: Sell if up 5%
+                elif pnl_pct >= 5.0:
+                    print(f"\n   🟢 TAKE PROFIT TRIGGERED for {symbol}")
+                    print(f"      Entry: ${entry_price:.2f} | Current: ${current_price:.2f} | Profit: {pnl_pct:.1f}%")
+
+                    order_request = MarketOrderRequest(
+                        symbol=symbol,
+                        qty=qty,
+                        side=OrderSide.SELL,
+                        time_in_force=TimeInForce.DAY
+                    )
+                    order = self.trading_client.submit_order(order_request)
+                    print(f"      ✅ Take profit order submitted! Order ID: {order.id}")
+
+                    self.trade_history.append({
+                        "timestamp": datetime.now(),
+                        "symbol": symbol,
+                        "action": "TAKE_PROFIT",
+                        "shares": qty,
+                        "price": current_price,
+                        "pnl": qty * (current_price - entry_price)
+                    })
+
+        except Exception as e:
+            print(f"Error checking positions: {e}")
+
     def print_performance(self):
         """Print performance summary"""
         try:
             account = self.trading_client.get_account()
             positions = self.trading_client.get_all_positions()
+
+            # FIX: Remove 'limit' parameter - use get_orders() without arguments
+            orders = self.trading_client.get_orders()
 
             print("\n" + "=" * 50)
             print("📊 PERFORMANCE SUMMARY")
@@ -275,32 +360,107 @@ class SimpleLiveTrader:
             total_pnl = current_equity - initial_capital
             total_return = (total_pnl / initial_capital) * 100
 
-            print(f"Initial Capital: ${initial_capital:,.2f}")
-            print(f"Current Equity: ${current_equity:,.2f}")
-            print(f"Total P&L: ${total_pnl:+,.2f}")
-            print(f"Total Return: {total_return:+.2f}%")
+            print(f"💰 Account:")
+            print(f"   Initial Capital: ${initial_capital:,.2f}")
+            print(f"   Current Equity: ${current_equity:,.2f}")
+            print(f"   Total P&L: ${total_pnl:+,.2f}")
+            print(f"   Total Return: {total_return:+.2f}%")
+            print(f"   Buying Power: ${float(account.buying_power):,.2f}")
 
             # Open positions
             if positions:
-                print(f"\n📈 Open Positions ({len(positions)}):")
+                print(f"\n📈 OPEN POSITIONS ({len(positions)}):")
                 for pos in positions:
+                    entry = float(pos.avg_entry_price)
+                    current = float(pos.current_price)
                     pnl = float(pos.unrealized_pl)
-                    print(f"   {pos.symbol}: ${pnl:+.2f}")
+                    pnl_pct = ((current - entry) / entry) * 100
+                    print(
+                        f"   {pos.symbol}: {pos.qty} shares | Entry: ${entry:.2f} | Current: ${current:.2f} | P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)")
+
+            # Recent orders (last 10)
+            if orders:
+                print(f"\n📋 RECENT ORDERS (last 10):")
+                filled_count = 0
+                for order in orders[-10:]:  # Get last 10 using list slicing
+                    if order.status == 'filled':
+                        filled_count += 1
+                        print(
+                            f"   ✅ {order.symbol}: {order.side} {order.filled_qty} shares @ ${float(order.filled_avg_price):.2f}")
+                    elif order.status in ['new', 'pending_new', 'accepted']:
+                        print(f"   ⏳ {order.symbol}: {order.side} {order.qty} shares - {order.status} (not yet filled)")
+                    else:
+                        print(f"   {order.symbol}: {order.side} {order.qty} shares - {order.status}")
+
+                if filled_count == 0 and orders:
+                    print(f"   ⚠️ No filled orders found.")
 
             print("=" * 50)
         except Exception as e:
             print(f"Error getting performance: {e}")
 
+    def print_trade_summary(self):
+        """Print detailed summary of all trades"""
+        if not self.trade_history:
+            print("\n📊 No trades executed yet")
+            return
+
+        print("\n" + "=" * 60)
+        print("📊 COMPLETE TRADE HISTORY")
+        print("=" * 60)
+
+        # Group by action
+        buys = [t for t in self.trade_history if t['action'] == 'BUY']
+        sells = [t for t in self.trade_history if t['action'] == 'SELL']
+        stop_losses = [t for t in self.trade_history if t['action'] == 'STOP_LOSS']
+        take_profits = [t for t in self.trade_history if t['action'] == 'TAKE_PROFIT']
+
+        print(f"\n📈 BUYS ({len(buys)}):")
+        for t in buys:
+            print(
+                f"   {t['timestamp'].strftime('%H:%M:%S')} | {t['symbol']} | {t['shares']} shares @ ${t['price']:.2f}")
+
+        print(f"\n📉 SELLS ({len(sells)}):")
+        for t in sells:
+            pnl = t.get('pnl', 0)
+            print(
+                f"   {t['timestamp'].strftime('%H:%M:%S')} | {t['symbol']} | {t['shares']} shares @ ${t['price']:.2f} | P&L: ${pnl:+.2f}")
+
+        print(f"\n🔴 STOP LOSSES ({len(stop_losses)}):")
+        for t in stop_losses:
+            print(f"   {t['timestamp'].strftime('%H:%M:%S')} | {t['symbol']} | Loss: ${t['pnl']:+.2f}")
+
+        print(f"\n🟢 TAKE PROFITS ({len(take_profits)}):")
+        for t in take_profits:
+            print(f"   {t['timestamp'].strftime('%H:%M:%S')} | {t['symbol']} | Profit: ${t['pnl']:+.2f}")
+
+        # Calculate totals
+        total_pnl = sum(t.get('pnl', 0) for t in self.trade_history if 'pnl' in t)
+        winning_trades = [t for t in self.trade_history if t.get('pnl', 0) > 0]
+        losing_trades = [t for t in self.trade_history if t.get('pnl', 0) < 0]
+
+        print(f"\n💰 TOTAL P&L: ${total_pnl:+.2f}")
+        print(f"📊 WINNING TRADES: {len(winning_trades)}")
+        print(f"📉 LOSING TRADES: {len(losing_trades)}")
+        if len(winning_trades) + len(losing_trades) > 0:
+            win_rate = len(winning_trades) / (len(winning_trades) + len(losing_trades)) * 100
+            print(f"🎯 WIN RATE: {win_rate:.1f}%")
+
+        print("=" * 60)
+
     def run_once(self):
         """Run one trading cycle"""
-        print(f"\n{'#'*60}")
+        print(f"\n{'#' * 60}")
         print(f"🔄 TRADING CYCLE at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'#'*60}")
+        print(f"{'#' * 60}")
 
         # Get account info
         account = self.trading_client.get_account()
         print(f"💰 Buying Power: ${float(account.buying_power):,.2f}")
         print(f"💰 Portfolio Value: ${float(account.portfolio_value):,.2f}")
+
+        # Check existing positions for stop loss/take profit
+        self.check_positions_for_exits()
 
         for symbol in self.symbols:
             try:
@@ -308,9 +468,10 @@ class SimpleLiveTrader:
             except Exception as e:
                 print(f"❌ Error checking {symbol}: {e}")
 
-        # Show summary
-        print(f"\n📊 Summary:")
-        print(f"   Total Trades: {len(self.trade_history)}")
+        # Show trade summary (ADD THIS)
+        self.print_trade_summary()
+
+        # Show performance
         self.print_performance()
 
     def run_continuous(self):
